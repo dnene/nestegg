@@ -8,10 +8,10 @@ log = logging.getLogger(__name__)
 def get_default_config_file():
     try :
         return next(filter(lambda f: opath.exists(f), 
-                [opath.join(opath.expanduser('~'), 'nestegg.conf'),
+                [opath.join(opath.expanduser('~'), 'nestegg.ini'),
                  opath.join(opath.dirname(opath.abspath(sys.argv[0])), 
-                              '../etc/nestegg.conf'),
-                 '/etc/nestegg.conf' ]))
+                              '../etc/nestegg.ini'),
+                 '/etc/nestegg.ini' ]))
     except StopIteration :
         return None
 
