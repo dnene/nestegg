@@ -1,7 +1,8 @@
-import logging, os, shutil, sys, tempfile, os.path as opath
+import logging, os, shutil, sys, tempfile, os.path as opath, configparser
 from bottle import run, abort, static_file, SimpleTemplate, default_app
 from pkg_resources import Requirement
 from setuptools.package_index import PackageIndex, egg_info_for_url as egg_info
+import logging.config
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
 
@@ -23,8 +24,15 @@ def get_app():
         "nestegg.index_url": "http://pypi.python.org/simple",
         "nestegg.port": "7654", "nestegg.fresh": '0'})
     config_file = get_default_config_file()
-    if config_file : 
-        app.config.load_config(config_file)
+    if config_file :
+        config = configparser.ConfigParser() 
+        with open(config_file,"r") as in_config :
+            config.read_file(in_config)
+            section = config['nestegg'] 
+            for key in section :
+                app.config["nestegg.{}".format(key)] = section[key]
+                        
+            
         logging.config.fileConfig(config_file)
     return app
 
