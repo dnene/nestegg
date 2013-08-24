@@ -1,7 +1,10 @@
-import logging, os, shutil, sys, tempfile, os.path as opath, configparser
+import os, shutil, sys, tempfile, os.path as opath, configparser
 from bottle import run, abort, static_file, SimpleTemplate, default_app
 from pkg_resources import Requirement
 from setuptools.package_index import PackageIndex, egg_info_for_url as egg_info
+from subprocess import call
+import sh
+from sh import git, hg, cd, cp
 import logging.config
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
@@ -16,23 +19,23 @@ def get_default_config_file():
     except StopIteration :
         return None
 
+#            if build_tuple[0] == "hg" :
+                
+            
+    
 def get_app():
     app = default_app()
-    app.config.update({
-        "nestegg.eggs_dir": "{}/.nestegg/cache".format(
-                                        opath.expanduser('~')),
-        "nestegg.index_url": "http://pypi.python.org/simple",
-        "nestegg.port": "7654", "nestegg.fresh": '0'})
+    config = configparser.ConfigParser()
+    app.config["config"] = config
+    config['nestegg'] = {
+        "eggs_dir" : "{}/.nestegg/cache".format(opath.expanduser('~')),
+        "index_url": "https://pypi.python.org/simple",
+        "port": 7654,  "fresh": "0",
+    }
     config_file = get_default_config_file()
     if config_file :
-        config = configparser.ConfigParser() 
         with open(config_file,"r") as in_config :
             config.read_file(in_config)
-            section = config['nestegg'] 
-            for key in section :
-                app.config["nestegg.{}".format(key)] = section[key]
-                        
-            
         logging.config.fileConfig(config_file)
     return app
 
@@ -47,10 +50,73 @@ class NesteggPackageIndex(PackageIndex):
         super().process_index(url, page)
 
 app = get_app()  
-eggs_dir, index_url, fresh = [app.config.get("nestegg.{}".format(attr)) 
+eggs_dir, index_url, fresh = [app.config["config"]["nestegg"][attr] 
         for attr in ("eggs_dir", "index_url", "fresh")] 
 os.makedirs(eggs_dir,0o755, exist_ok=True)
 pkg_idx = NesteggPackageIndex(fresh, index_url)
+
+class NesteggException(Exception):
+    def __init__(self, value, cause=None) :
+        self.value = value
+        self.cause = cause
+    def __str__(self) :
+        return repr(self.value)
+
+def errorable(error_str) :
+    def wrapper(f) :
+        def inner(**kwargs) :
+            cause = None
+            try :
+                ret = f(**kwargs) 
+            except Exception as e:
+                cause = e
+            if cause or (ret and ret != 0) :
+                print(kwargs)
+                raise NesteggException(error_str.format_map(kwargs), cause)
+        return inner
+    return wrapper
+
+@errorable("Cannot create directory {co_dir}")
+def to_checkout_dir(co_dir) :
+    if opath.exists(co_dir): shutil.rmtree(co_dir)
+    os.makedirs(co_dir,exist_ok=True)
+    cd(co_dir)
+
+@errorable("Cannot checkout repo {repo_type}:{repo}:{tag}")
+def checkout(rtyp, repo, tag, dir_name) :
+    gmap = { "hg" : ("hg", "-u"), "git": ("git", "-b") }
+    return call([gmap[rtyp][0], "clone", gmap[rtyp][1], tag, repo, dir_name]) 
+
+@errorable("Cannot create sdist for {package_name}:{tag_name}")
+def do_sdist(package_name, tag_name) :
+    cd(tag_name)
+    return call(["python", "setup.py", "sdist"])
+
+@errorable("Cannot copy sdist for {pkg_name}:{tag}:{dist_file}")
+def copy_sdist(eggs_dir, pkg_name, tag, dist_file):
+    os.makedirs(opath.join(eggs_dir, "_custom", pkg_name), exist_ok=True)
+    cp(opath.join(eggs_dir, "_checkout", pkg_name, tag, "dist", dist_file),
+       opath.join(eggs_dir, "_custom_builds", pkg_name, dist_file))
+
+
+def check_custom_builds(config):
+    for pkg_name, builds in list((sec.split("_")[-1], 
+        list((ver, config[sec][ver].split("|")) for ver in config[sec])) 
+            for sec in config if sec.startswith("nestegg_builds")) :
+        for tag, (rtyp, repo, dfile) in builds :
+            ensure_dist(pkg_name, rtyp, repo, tag, dfile)
+
+def ensure_dist(pkg_name, rtyp, repo, tag, dfile) :
+    dist_file = opath.join(eggs_dir, "_custom_builds", pkg_name, dfile) 
+    if not opath.exists(dist_file) :
+        to_checkout_dir(co_dir=opath.join(eggs_dir,"_checkout",pkg_name))
+        checkout(rtyp=rtyp, repo=repo, tag=tag, dir_name=tag)
+        do_sdist(package_name=pkg_name, tag_name=tag)
+        os.makedirs(opath.dirname(dist_file), exist_ok=True)
+        cp(opath.join(eggs_dir, "_checkout", pkg_name, tag, "dist", dfile), 
+                dist_file)
+
+check_custom_builds(app.config["config"])
 
 with open("views/package.tpl", "r") as infile :
     pindex = SimpleTemplate(source=infile)
@@ -97,11 +163,14 @@ def get_egg(pkg_name, egg_name):
             if egg_info(dist.location)[0] == egg_name:
                 log.debug("Fetch {}/{}".format(pkg_name,egg_name))
                 tmp = tempfile.gettempdir()
-                shutil.move(pkg_idx.download(dist.location, tmp), fpath)
-                return static_file(egg_name, root=pkg_dir)
+                try :
+                    shutil.move(pkg_idx.download(dist.location, tmp), fpath)
+                    return static_file(egg_name, root=pkg_dir)
+                except Exception as _e :
+                    pass
         abort(404,"No egg found for {} {}".format(pkg_name,egg_name))
     else :
         return static_file(egg_name, root=pkg_dir)
 
 if __name__ == "__main__" :
-    run(host='0.0.0.0', port = app.config.get("nestegg.port"))
+    run(host='0.0.0.0', port = app.config["config"]["nestegg"]["port"])
