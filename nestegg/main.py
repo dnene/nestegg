@@ -1,12 +1,17 @@
-import os, shutil, sys, tempfile, os.path as opath 
-from bottle import run, abort, static_file, SimpleTemplate, default_app
+from bottle import run, abort, static_file, SimpleTemplate, default_app, redirect
+from hashlib import md5
 from pkg_resources import Requirement
 from setuptools.package_index import PackageIndex, egg_info_for_url as egg_info
+from sh import git, hg, cd, cp
 from subprocess import call
 from yaml import load, dump
-from sh import git, hg, cd, cp
-from hashlib import md5
 import logging.config
+import os
+import shutil
+import sys
+import tempfile
+import os.path as opath
+
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
 
@@ -162,9 +167,17 @@ def get_package(pkg_name):
         abort(404, "No such package {}".format(pkg_name))
 
 @app.route('/<pkg_name>/<egg_name>')
+@app.route('/<pkg_name>/<egg_name>/')
 def get_egg(pkg_name, egg_name):
     log.debug("Package: {} egg:{}".format(pkg_name, egg_name))
     pkg_dir = opath.join(config.nestegg.pypi_dir, pkg_name)
+    if not egg_name.startswith(pkg_name) :
+        egg_name="{}-{}.".format(pkg_name,egg_name)
+        if opath.exists(pkg_dir) :
+            for fname in os.listdir(pkg_dir) :
+                if fname.startswith(egg_name) and fname != egg_name :
+                    egg_name = fname
+                    break
     fpath = opath.join(config.nestegg.pypi_dir, pkg_name, egg_name)
     if not opath.exists(fpath) :
         pkg_idx.find_packages(Requirement.parse(pkg_name))
