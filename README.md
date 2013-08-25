@@ -57,7 +57,11 @@ All the source builds and versions you defined will be cloned, the corresponding
 * Start the server
 
 ```
-nestegg
+$ nestegg
+Bottle v0.11.6 server starting up (using WSGIRefServer())...
+Listening on http://0.0.0.0:7654/
+Hit Ctrl-C to quit.
+
 ```
 
 Use http://localhost:7654 as the index url with pip or tox or other clients
