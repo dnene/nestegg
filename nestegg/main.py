@@ -1,6 +1,6 @@
-from bottle import run, abort, static_file, SimpleTemplate, default_app, redirect
+from bottle import run,route,abort,static_file,SimpleTemplate,default_app,app,request
 from hashlib import md5
-from pkg_resources import Requirement
+from pkg_resources import Requirement, resource_string
 from setuptools.package_index import PackageIndex, egg_info_for_url as egg_info
 from sh import git, hg, cd, cp
 from subprocess import call
@@ -25,10 +25,10 @@ def lookup_config_file(filename):
     except StopIteration :
         return None
 
-class Config: pass
+class Generic: pass
 def get_config(data) :
     if isinstance(data, dict) :
-        config = Config()
+        config = Generic()
         for key, value in data.items() :
             setattr(config, key, get_config(value))
         return config
@@ -59,10 +59,10 @@ def get_app():
     neconfig.pypi_dir = os.path.join(neconfig.nestegg_dir,"pypi")
     neconfig.checkout_dir = os.path.join(neconfig.nestegg_dir,"checkout")
     neconfig.source_dir = os.path.join(neconfig.nestegg_dir,"source_builds")
+    neconfig.private_packages = set()
     os.makedirs(neconfig.pypi_dir,0o755, exist_ok=True)
     app.config['config'] = config
-    app.config['runtime'] = {'local_packages' : set()}
-    return app, config
+    return app
 
 class NesteggPackageIndex(PackageIndex):
     def __init__(self, fresh, *args, **kwargs):
@@ -74,9 +74,6 @@ class NesteggPackageIndex(PackageIndex):
             del self.fetched_urls[url]
         super().process_index(url, page)
 
-app, config = get_app()  
-
-pkg_idx = NesteggPackageIndex(config.nestegg.fresh, config.nestegg.index_url)
 
 def source_build_dir(config, pkg_name) : 
     return opath.join(config.nestegg.source_dir, pkg_name)
@@ -88,6 +85,8 @@ def check_source_builds(config):
     cwd = os.getcwd()
     os.makedirs(config.nestegg.checkout_dir,exist_ok=True)
     for pkg in  config.nestegg.source_builds :
+        if not hasattr(pkg, "private") : setattr(pkg, "private", False)
+        elif pkg.private : config.nestegg.private_packages.add(pkg.name)
         if any(not opath.exists(source_build_file(config,pkg.name, v.dist_file)) 
                     for v in pkg.versions) :
             os.makedirs(source_build_dir(config,pkg.name), exist_ok=True)
@@ -96,20 +95,12 @@ def check_source_builds(config):
             cd(config.nestegg.checkout_dir)
             call([pkg.repo_type, "clone", pkg.repo_url, pkg.name]) 
             cd(pkg_co_dir)
-            for version in pkg.versions :
-                call([pkg.repo_type, "checkout", version.tag])
+            for ver in pkg.versions :
+                call([pkg.repo_type, "checkout", ver.tag])
                 call(["python", "setup.py", "sdist"])
-                cp(opath.join(pkg_co_dir,"dist",version.dist_file),
+                cp(opath.join(pkg_co_dir,"dist",ver.dist_file),
                    source_build_dir(config, pkg.name))
     cd(cwd)
-
-check_source_builds(app.config["config"])
-
-with open("views/package.tpl", "r") as infile :
-    pindex = SimpleTemplate(source=infile)
-    
-with open("views/all_packages.tpl", "r") as infile :
-    gindex = SimpleTemplate(source=infile)
 
 def file_md5(path) :
     m = md5()
@@ -118,11 +109,12 @@ def file_md5(path) :
             m.update(chunk)
     return m.hexdigest()
 
-def get_pkg_html(config, local_pkgs, pkg_path, pkg_idx, pkg_name):
+def get_pkg_html(config, pkg_path, pkg_idx, pkg_name, pindex):
     os.makedirs(pkg_path, exist_ok=True)
     html_file = opath.join(pkg_path, "index.html")
-    versions = [] if pkg_name in local_pkgs or not pkg_idx[pkg_name] else \
-               [egg_info(d.location) for d in pkg_idx[pkg_name]]
+    versions = [] if pkg_name in config.nestegg.private_packages or \
+                     not pkg_idx[pkg_name] \
+               else [egg_info(d.location) for d in pkg_idx[pkg_name]]
     if pkg_idx.fresh or not opath.exists(html_file) :
         source_pkg_dir = source_build_dir(config, pkg_name)
         if opath.exists(source_pkg_dir) :
@@ -136,39 +128,42 @@ def get_pkg_html(config, local_pkgs, pkg_path, pkg_idx, pkg_name):
             outfile.write(pindex.render(**info))
     return (pkg_path, "index.html")
                 
-@app.route('/')
+@route('/')
 def get_root():
+    config, pkg_idx = app.config['config'], app.config['pkg_idx']
     if not opath.exists(opath.join(config.nestegg.pypi_dir,"index.html")):
         log.debug("Updating base index")
         pkg_idx.scan_all()
         with open(opath.join(config.nestegg.pypi_dir,"index.html"), "w") as h :
-            h.write(gindex.render(pkgs=sorted(pkg_idx.package_pages)))
+            h.write(app.config['views'].gindex.render(
+                pkgs=sorted(pkg_idx.package_pages)))
     return static_file("index.html", root=config.nestegg.pypi_dir)    
 
-def is_valid_package(config, local_pkgs, pkg_idx, pkg_name) :
-    if pkg_name in local_pkgs : return True
-    exists_build_dir = opath.exists(source_build_dir(config, pkg_name))
-    if exists_build_dir :
+def is_valid_package(config, pkg_idx, pkg_name) :
+    if pkg_name in config.nestegg.private_packages : return True
+    if  opath.exists(source_build_dir(config, pkg_name)) :
         if not pkg_idx[pkg_name] :
-            local_pkgs.add(pkg_name)
+            config.nestegg.private_packages.add(pkg_name)
         return True
     return True if pkg_idx[pkg_name] else False
 
-@app.route('/<pkg_name>/')
+@route('/<pkg_name>/')
 def get_package(pkg_name):
-    local = app.config['runtime']['local_packages']
-    config = app.config['config']
-    pkg_idx.find_packages(Requirement.parse(pkg_name))
+    config, pkg_idx = request.app.config['config'], request.app.config['pkg_idx']
+    if pkg_name not in config.nestegg.private_packages :
+        pkg_idx.find_packages(Requirement.parse(pkg_name))
     pkg_path = opath.join(config.nestegg.pypi_dir, pkg_name)
-    if is_valid_package(config, local, pkg_idx, pkg_name) :
-        root, html = get_pkg_html(config, local, pkg_path, pkg_idx, pkg_name)
+    if is_valid_package(config, pkg_idx, pkg_name) :
+        root, html = get_pkg_html(config, pkg_path, pkg_idx, pkg_name,
+                request.app.config['views'].pindex)
         return static_file(html, root=root)  
     else:
         abort(404, "No such package {}".format(pkg_name))
 
-@app.route('/<pkg_name>/<egg_name>')
-@app.route('/<pkg_name>/<egg_name>/')
+@route('/<pkg_name>/<egg_name>')
+@route('/<pkg_name>/<egg_name>/')
 def get_egg(pkg_name, egg_name):
+    config, pkg_idx = request.app.config['config'], request.app.config['pkg_idx']
     log.debug("Package: {} egg:{}".format(pkg_name, egg_name))
     pkg_dir = opath.join(config.nestegg.pypi_dir, pkg_name)
     if not egg_name.startswith(pkg_name) :
@@ -194,5 +189,18 @@ def get_egg(pkg_name, egg_name):
     else :
         return static_file(egg_name, root=pkg_dir)
 
+def main() :
+    app = get_app()  
+    config = app.config['config']
+    pkg_idx = NesteggPackageIndex(config.nestegg.fresh, config.nestegg.index_url)
+    app.config['pkg_idx'] = pkg_idx
+    check_source_builds(app.config["config"])
+    app.config['views'] = Generic()
+    app.config['views'].pindex = \
+        SimpleTemplate(resource_string('nestegg','views/package.tpl'))
+    app.config['views'].gindex = \
+        SimpleTemplate(resource_string('nestegg','views/all_packages.tpl'))
+    run(app=app, host='0.0.0.0', port = config.nestegg.port)
+
 if __name__ == "__main__" :
-    run(host='0.0.0.0', port = config.nestegg.port)
+    main()
