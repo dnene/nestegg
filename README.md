@@ -8,8 +8,8 @@ While it has sufficient capabilities for me to start using it, _this is an early
 
 ### _Implemented_
 * **Pypi Mirror**: Mirrors packages from pypi.python.org. 
-..* **On demand**: Packages are requested only when requested for. 
-..* **Lightweight**: Downloads and mirrors only those versions requested for.
+* **On demand**: Packages are downloaded only when requested for. 
+* **Lightweight**: Downloads and mirrors only those versions requested for.
 * **Pypi like repository**: For locally customised open source software or private in house packages.
 
 ### _TODO_
@@ -17,16 +17,19 @@ While it has sufficient capabilities for me to start using it, _this is an early
 * **Continuous testing**: Test all defined source builds at defined intervals
 * Apache integration using mod\_wsgi
 * Refresh pypi packages and indices
-* Additional python versions (currently tested only with python 3.3
+* Additional python versions (currently tested only with python 3.3)
 
 ## Quick start
 
 * Create and activate a python 3.3 virtual env. (Currently not tested using any other version)
 * Install package
+
 ```
 pip install nestegg
 ```
+
 * Create configuration file for nestegg in your home directory `$HOME/nestegg.yml`. Sample :
+
 ```yaml
 nestegg:
   port: 7654                                              # Port to run on
@@ -40,9 +43,8 @@ nestegg:
         - version: 1.0.0                                  # python version
           tag: 1.0.0                                      # git/hg branch/tag name
           dist_file: mypackage-1.0.0.tar.gz               # source dist file name
-
-
 ```
+
 For each source build / version defined, nestegg will :
 * Create a git or hg clone from the git / hg repo
 * Checkout the defined tag / branch
