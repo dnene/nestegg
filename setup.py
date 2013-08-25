@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='nestegg',
-    version='0.0.1dev',
+    version='0.0.1alpha1',
     author='Dhananjay Nene',
     author_email='dhananjay.nene@gmail.com',
     packages=['nestegg',],
