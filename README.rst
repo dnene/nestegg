@@ -39,6 +39,8 @@ Quick start
 
 * Create configuration file for nestegg in your home directory `$HOME/nestegg.yml` ::
 
+.. code:: yml
+
   nestegg:
     nestegg_dir: /var/cache/nestegg                         # Where nestegg makes a nest
     port: 7654                                              # Port to run on
