@@ -128,7 +128,7 @@ def get_pkg_html(config, pkg_path, pkg_idx, pkg_name, pindex):
             outfile.write(pindex.render(**info))
     return (pkg_path, "index.html")
                 
-@route('/')
+@route('/simple/')
 def get_root():
     config, pkg_idx = app.config['config'], app.config['pkg_idx']
     if not opath.exists(opath.join(config.nestegg.pypi_dir,"index.html")):
@@ -147,7 +147,7 @@ def is_valid_package(config, pkg_idx, pkg_name) :
         return True
     return True if pkg_idx[pkg_name] else False
 
-@route('/<pkg_name>/')
+@route('/simple/<pkg_name>/')
 def get_package(pkg_name):
     config, pkg_idx = request.app.config['config'], request.app.config['pkg_idx']
     if pkg_name not in config.nestegg.private_packages :
@@ -160,8 +160,8 @@ def get_package(pkg_name):
     else:
         abort(404, "No such package {}".format(pkg_name))
 
-@route('/<pkg_name>/<egg_name>')
-@route('/<pkg_name>/<egg_name>/')
+@route('/simple/<pkg_name>/<egg_name>')
+@route('/simple/<pkg_name>/<egg_name>/')
 def get_egg(pkg_name, egg_name):
     config, pkg_idx = request.app.config['config'], request.app.config['pkg_idx']
     log.debug("Package: {} egg:{}".format(pkg_name, egg_name))
