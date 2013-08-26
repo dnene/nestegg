@@ -16,6 +16,7 @@ Features
 
 * *Pypi like repository*: For software you author or python libraries you modify but only publish internally
 * *Pypi Mirror*: Mirrors packages from pypi.python.org. 
+
   * *On demand*: Packages are downloaded only when requested for. 
   * *Lightweight*: Downloads and mirrors only those versions requested for.
 
@@ -67,6 +68,8 @@ All the source builds and versions you defined will be cloned, the corresponding
 
 * Start nestegg server::
 
+.. code:: 
+
   $ nestegg
   Bottle v0.11.6 server starting up (using WSGIRefServer())...
   Listening on http://0.0.0.0:7654/
@@ -81,7 +84,7 @@ Goals
 -----
 
 * Create a desktop / intranet mirror of all packages used. Create new test virtualenvs readily without having to wait for long downloads
-* Manage versions of your package dependencies (even if pypi eventually does not publish the versions you rely upon)
+* Manage versions of your package dependencies (even if pypi eventually unpublishes the versions you rely upon)
 * Publish versions of libraries you fork, or any you create to a pypi like repository without having to publish it globally.
-* Ensure access control. Continues to work with git/hg authentication over ssh
-* (TODO) Continuous / automatic integration / testing of python packages you author and maintain.
+* Access control on git / hg repos can make it hard to use github / bitbucket tarballs in dependency_links. This circumvents that issue.
+* (TODO) Continuous / automatic integration / testing of python packages you author and maintain. Intend to publish package information and their test results over http. 
