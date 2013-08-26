@@ -59,6 +59,7 @@ def get_app():
     neconfig.pypi_dir = os.path.join(neconfig.nestegg_dir,"pypi")
     neconfig.checkout_dir = os.path.join(neconfig.nestegg_dir,"checkout")
     neconfig.source_dir = os.path.join(neconfig.nestegg_dir,"source_builds")
+    neconfig.archives_dir =os.path.join(neconfig.nestegg_dir,"archived_builds")
     neconfig.private_packages = set()
     os.makedirs(neconfig.pypi_dir,0o755, exist_ok=True)
     app.config['config'] = config
@@ -78,6 +79,9 @@ class NesteggPackageIndex(PackageIndex):
 def source_build_dir(config, pkg_name) : 
     return opath.join(config.nestegg.source_dir, pkg_name)
 
+def archives_dir(config, pkg_name) : 
+    return opath.join(config.nestegg.archives_dir, pkg_name)
+
 def source_build_file(config, pkg_name, file_name) : 
     return opath.join(config.nestegg.source_dir, pkg_name, file_name)
 
@@ -96,10 +100,13 @@ def check_source_builds(config):
             call([pkg.repo_type, "clone", pkg.repo_url, pkg.name]) 
             cd(pkg_co_dir)
             for ver in pkg.versions :
+                pyexe = "python" if not hasattr(ver,"python") else ver.python
+                print("Python is {}".format(pyexe))
                 call([pkg.repo_type, "checkout", ver.tag])
-                call(["python", "setup.py", "sdist"])
+                call([pyexe, "setup.py", "sdist"])
                 cp(opath.join(pkg_co_dir,"dist",ver.dist_file),
-                   source_build_dir(config, pkg.name))
+                   opath.join(source_build_dir(config, pkg.name),
+                       ver.dist_file))
     cd(cwd)
 
 def file_md5(path) :
@@ -112,17 +119,25 @@ def file_md5(path) :
 def get_pkg_html(config, pkg_path, pkg_idx, pkg_name, pindex):
     os.makedirs(pkg_path, exist_ok=True)
     html_file = opath.join(pkg_path, "index.html")
-    versions = [] if pkg_name in config.nestegg.private_packages or \
-                     not pkg_idx[pkg_name] \
-               else [egg_info(d.location) for d in pkg_idx[pkg_name]]
+    if pkg_name in config.nestegg.private_packages or not pkg_idx[pkg_name] :
+      versions = {}
+    else :
+        versions = dict((egg_info(d.location) for d in pkg_idx[pkg_name]))
     if pkg_idx.fresh or not opath.exists(html_file) :
+        archives_pkg_dir = archives_dir(config, pkg_name)
+        if opath.exists(archives_pkg_dir) :
+            for fname in os.listdir(archives_pkg_dir) :
+                fpath = opath.join(archives_pkg_dir,fname)
+                if opath.isfile(fpath) :
+                    cp(fpath, pkg_path)
+                    versions[fname] =  "md5={}".format(file_md5(fpath))
         source_pkg_dir = source_build_dir(config, pkg_name)
         if opath.exists(source_pkg_dir) :
             for fname in os.listdir(source_pkg_dir) :
                 fpath = opath.join(source_pkg_dir,fname)
                 if opath.isfile(fpath) :
                     cp(fpath, pkg_path)
-                    versions.append((fname, "md5={}".format(file_md5(fpath))))
+                    versions[fname] =  "md5={}".format(file_md5(fpath))
         info = {"name" : pkg_name,"versions": versions }
         with open(html_file, "w") as outfile :
             outfile.write(pindex.render(**info))
@@ -130,7 +145,7 @@ def get_pkg_html(config, pkg_path, pkg_idx, pkg_name, pindex):
                 
 @route('/simple/')
 def get_root():
-    config, pkg_idx = app.config['config'], app.config['pkg_idx']
+    config, pkg_idx = request.app.config['config'], request.app.config['pkg_idx']
     if not opath.exists(opath.join(config.nestegg.pypi_dir,"index.html")):
         log.debug("Updating base index")
         pkg_idx.scan_all()
@@ -141,7 +156,8 @@ def get_root():
 
 def is_valid_package(config, pkg_idx, pkg_name) :
     if pkg_name in config.nestegg.private_packages : return True
-    if  opath.exists(source_build_dir(config, pkg_name)) :
+    if opath.exists(archives_dir(config, pkg_name)) : return True
+    if opath.exists(source_build_dir(config, pkg_name)) :
         if not pkg_idx[pkg_name] :
             config.nestegg.private_packages.add(pkg_name)
         return True
