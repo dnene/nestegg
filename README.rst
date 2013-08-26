@@ -13,12 +13,13 @@ Features
   Still in early stages, though has enough features for me to use it
 
 **Implemented**
+
 * *Pypi like repository*: For software you author or python libraries you modify but only publish internally
 * *Pypi Mirror*: Mirrors packages from pypi.python.org. 
   * *On demand*: Packages are downloaded only when requested for. 
   * *Lightweight*: Downloads and mirrors only those versions requested for.
 
-** TODO **
+**TODO**
 
 * **Continuous integration**: Test all defined source builds at defined intervals or based on git / hg commits
 * Apache integration using mod_wsgi
@@ -28,8 +29,10 @@ Features
 Quick start
 -----------
 
-* Create and activate a python virtual env. 
+* Create and activate a python virtual environment
+
   * Currently only tested with python version 3.3. Additional versions to be added later
+
 * Install package::
 
     $ pip install nestegg
@@ -67,9 +70,7 @@ All the source builds and versions you defined will be cloned, the corresponding
   Listening on http://0.0.0.0:7654/
   Hit Ctrl-C to quit.
 
-Use http://localhost:7654/simple as the index url with pip or tox or other clients
-
-eg. ::
+Use http://localhost:7654/simple as the index url with pip or tox or other clients. eg. ::
 
   $ pip install SQLAlchemy==0.8.2 --index-url=http://localhost:7654 
 
