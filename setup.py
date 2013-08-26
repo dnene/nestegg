@@ -13,6 +13,7 @@ setup(
         'bottle >= 0.11',
         'PyYAML == 3.10',
         'sh >= 1.08',
+        'requests >= 1.2.3',
     ],
     keywords="pypi mirror build release packages",
     package_data = {

@@ -1,10 +1,11 @@
-from bottle import run,route,abort,static_file,SimpleTemplate,default_app,app,request
+from bottle import run,route,abort,static_file,SimpleTemplate,default_app,app,request,redirect
 from hashlib import md5
 from pkg_resources import Requirement, resource_string
 from setuptools.package_index import PackageIndex, egg_info_for_url as egg_info
 from sh import git, hg, cd, cp
 from subprocess import call
 from yaml import load, dump
+from requests import head
 import logging.config
 import os
 import shutil
@@ -14,6 +15,8 @@ import os.path as opath
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
+
+class NesteggException(Exception): pass
 
 def lookup_config_file(filename):
     try :
@@ -35,7 +38,14 @@ def get_config(data) :
     elif isinstance(data, (list, tuple)) :
         return [get_config(item) for item in data]
     return data
-    
+
+def scan_packages(config) :
+    packages = {}
+    for dirname in os.listdir(config.nestegg.pypi_dir) :
+        if opath.isdir(opath.join(config.nestegg.pypi_dir,dirname)) :
+            packages[dirname.lower()] = dirname
+    config.runtime.packages = packages
+
 def get_app():
     app = default_app()
     default_config = {
@@ -61,8 +71,10 @@ def get_app():
     neconfig.source_dir = os.path.join(neconfig.nestegg_dir,"source_builds")
     neconfig.archives_dir =os.path.join(neconfig.nestegg_dir,"archived_builds")
     neconfig.private_packages = set()
+    config.runtime = Generic()
     os.makedirs(neconfig.pypi_dir,0o755, exist_ok=True)
-    app.config['config'] = config
+    scan_packages(config)
+    app.config['ctx'] = config
     return app
 
 class NesteggPackageIndex(PackageIndex):
@@ -145,7 +157,7 @@ def get_pkg_html(config, pkg_path, pkg_idx, pkg_name, pindex):
                 
 @route('/simple/')
 def get_root():
-    config, pkg_idx = request.app.config['config'], request.app.config['pkg_idx']
+    config, pkg_idx = request.app.config['ctx'], request.app.config['pkg_idx']
     if not opath.exists(opath.join(config.nestegg.pypi_dir,"index.html")):
         log.debug("Updating base index")
         pkg_idx.scan_all()
@@ -163,9 +175,26 @@ def is_valid_package(config, pkg_idx, pkg_name) :
         return True
     return True if pkg_idx[pkg_name] else False
 
+def get_real_mixed_case_name(config, pkg_name):
+    mixed_case_name = config.runtime.packages.get(pkg_name.lower(),None)
+    if mixed_case_name and mixed_case_name == pkg_name :
+        return pkg_name
+    response = head("https://pypi.python.org/simple/{}/".format(pkg_name))
+    if 200 <= response.status_code < 300 : return pkg_name
+    elif response.status_code < 400 :
+        new_pkg_name = response.headers["location"].split("/")[-1]
+        if pkg_name.lower() == new_pkg_name.lower() :
+            config.runtime.packages[pkg_name.lower()] = new_pkg_name 
+            return new_pkg_name
+    raise NesteggException(
+        "Unable to get mixed case package name for {}".format(pkg_name))
+    
 @route('/simple/<pkg_name>/')
 def get_package(pkg_name):
-    config, pkg_idx = request.app.config['config'], request.app.config['pkg_idx']
+    config, pkg_idx = request.app.config['ctx'], request.app.config['pkg_idx']
+    real_pkg_name = get_real_mixed_case_name(config,pkg_name)
+    if real_pkg_name != pkg_name :
+        redirect('/simple/{}/'.format(real_pkg_name))
     if pkg_name not in config.nestegg.private_packages :
         pkg_idx.find_packages(Requirement.parse(pkg_name))
     pkg_path = opath.join(config.nestegg.pypi_dir, pkg_name)
@@ -179,7 +208,7 @@ def get_package(pkg_name):
 @route('/simple/<pkg_name>/<egg_name>')
 @route('/simple/<pkg_name>/<egg_name>/')
 def get_egg(pkg_name, egg_name):
-    config, pkg_idx = request.app.config['config'], request.app.config['pkg_idx']
+    config, pkg_idx = request.app.config['ctx'], request.app.config['pkg_idx']
     log.debug("Package: {} egg:{}".format(pkg_name, egg_name))
     pkg_dir = opath.join(config.nestegg.pypi_dir, pkg_name)
     if not egg_name.startswith(pkg_name) :
@@ -207,10 +236,10 @@ def get_egg(pkg_name, egg_name):
 
 def main() :
     app = get_app()  
-    config = app.config['config']
+    config = app.config['ctx']
     pkg_idx = NesteggPackageIndex(config.nestegg.fresh, config.nestegg.index_url)
     app.config['pkg_idx'] = pkg_idx
-    check_source_builds(app.config["config"])
+    check_source_builds(app.config["ctx"])
     app.config['views'] = Generic()
     app.config['views'].pindex = \
         SimpleTemplate(resource_string('nestegg','views/package.tpl'))
