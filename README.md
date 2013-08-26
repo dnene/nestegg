@@ -32,6 +32,7 @@ pip install nestegg
 
 ```yaml
 nestegg:
+  nestegg_dir: /var/cache/nestegg                         # Where nestegg makes a nest
   port: 7654                                              # Port to run on
   index-url: https://pypi.python.org/simple               # Pypi Index URL
   source_builds:                                          # List of source builds
