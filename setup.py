@@ -2,12 +2,13 @@ from setuptools import setup
 
 setup(
     name='nestegg',
-    version='0.0.1alpha1',
+    version='0.0.1alpha2',
     author='Dhananjay Nene',
     author_email='dhananjay.nene@gmail.com',
     packages=['nestegg',],
     license='The MIT License (MIT)',
-    description="On-demand, lightweight, package building pypi mirror",
+    description="Lightweight pypi mirror and continuous integration server",
+    long_description=open("README.rst").read(),
     install_requires = [
         'bottle >= 0.11',
         'PyYAML == 3.10',
