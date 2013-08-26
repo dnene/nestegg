@@ -77,7 +77,7 @@ All the source builds and versions you defined will be cloned, the corresponding
 
 Use http://localhost:7654/simple as the index url with pip or tox or other clients. eg. ::
 
-  $ pip install SQLAlchemy==0.8.2 --index-url=http://localhost:7654 
+  $ pip install SQLAlchemy==0.8.2 --index-url=http://localhost:7654/simple 
 
 
 Goals
