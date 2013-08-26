@@ -8,7 +8,7 @@ On-demand, lightweight, package building pypi mirror
 Features 
 --------
 
-.. note:: 
+.. note :: 
 
   Still in early stages, though has enough features for me to use it
 
@@ -21,7 +21,7 @@ Features
 
 **TODO**
 
-* **Continuous integration**: Test all defined source builds at defined intervals or based on git / hg commits
+* **Continuous integration**: Test all defined source builds at defined intervals and/or based on git / hg commits. Offer readonly web based interface to past tests and results
 * Apache integration using mod_wsgi
 * Refresh pypi packages and indices
 * Additional python versions (currently tested only with python 3.3)
@@ -84,4 +84,4 @@ Goals
 * Manage versions of your package dependencies (even if pypi eventually does not publish the versions you rely upon)
 * Publish versions of libraries you fork, or any you create to a pypi like repository without having to publish it globally.
 * Ensure access control. Continues to work with git/hg authentication over ssh
-* (TODO) Continuous / automatic testing of python packages you author and maintain.
+* (TODO) Continuous / automatic integration / testing of python packages you author and maintain.
