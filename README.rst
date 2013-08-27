@@ -32,11 +32,11 @@ Quick start
 
 * Create and activate a python virtual environment
 
-  * Currently only tested with python version 3.3. Additional versions to be added later
+  * Currently only tested with python version 3.3. Support for additional versions to be added later. 
 
 * Install package::
 
-    $ pip install nestegg
+    $ pip install http://github.com/dnene/nestegg/tarball
 
 * Create configuration file for nestegg in your home directory `$HOME/nestegg.yml` ::
 
