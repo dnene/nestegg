@@ -7,7 +7,8 @@ from subprocess import call
 from yaml import load, dump
 from requests import head
 from datetime import timedelta
-from  datetime import datetime as dt
+from datetime import datetime as dt
+from argparse import ArgumentParser
 import logging.config
 import os
 import shutil
@@ -44,14 +45,14 @@ def scan_packages(config) :
             packages[dirname.lower()] = dirname
     config.runtime.packages = packages
 
-def get_app():
+def get_app(args):
     app = default_app()
     default_config = {
         "nestegg_dir" : "{}/.nestegg".format(opath.expanduser('~')),
         "index_url": "https://pypi.python.org/simple",
         "port": 7654,  "fresh": "0", "refresh_interval": "1d",
     }
-    config_file = lookup_config_file("nestegg.yml")
+    config_file = args.conf or lookup_config_file("nestegg.yml")
     if config_file :
         with open(config_file,"r") as in_config :
             config = get_config(load(in_config))
@@ -234,8 +235,13 @@ def get_egg(pkg_name, egg_name):
     else :
         return static_file(egg_name, root=pkg_dir)
 
+def get_argparser() :
+    parser = ArgumentParser( description='lightweight pypi mirror and continuous integration tool')
+    parser.add_argument('--conf', help='configuration file')
+    return parser
+
 def main() :
-    app = get_app()  
+    app = get_app(get_argparser().parse_args(sys.argv[1:]))
     config = app.config['ctx']
     pkg_idx = NesteggPackageIndex(config.fresh, config.index_url)
     app.config['pkg_idx'] = pkg_idx
