@@ -14,8 +14,9 @@ setup(
         'PyYAML == 3.10',
         'sh >= 1.08',
         'requests >= 1.2.3',
+        'APScheduler >= 2.1.0',
     ],
-    keywords="pypi mirror build release packages",
+    keywords="pypi mirror build release packages continuous integration testing",
     package_data = {
         'nestegg': ['views/*.tpl']
     },

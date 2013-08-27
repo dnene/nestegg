@@ -9,6 +9,7 @@ from requests import head
 from datetime import timedelta
 from datetime import datetime as dt
 from argparse import ArgumentParser
+from apscheduler.scheduler import Scheduler
 import logging.config
 import os
 import shutil
@@ -136,6 +137,25 @@ def check_repositories(config):
                        ver.dist_file))
     cd(cwd)
 
+def tester(pkg, ver) :
+    def test() :
+        print("Running {}/{} at {}".format(pkg.name, ver.version, dt.now()))
+    return test
+
+def start_schedules(config) :
+    sched = Scheduler()
+    config.scheduler = sched
+    sched.start()
+    for pkg in config.repositories :
+        for ver in pkg.versions :
+            if hasattr(ver,"test_schedule") :
+                if not ver.is_branch :
+                    raise NesteggException(
+                        "{}:{} is not a branch. Cannot apply test_schedule".\
+                            format(pkg.name, ver.version))
+                sched.add_cron_job(tester(pkg,ver), 
+                    **ver.test_schedule.__dict__)
+
 def file_md5(path) :
     m = md5()
     with open(path,"rb") as infile :
@@ -258,6 +278,7 @@ def main() :
     pkg_idx = NesteggPackageIndex(config.fresh, config.index_url)
     app.config['pkg_idx'] = pkg_idx
     check_repositories(app.config["ctx"])
+    start_schedules(app.config["ctx"])
     app.config['views'] = Generic()
     app.config['views'].pindex = \
         SimpleTemplate(resource_string('nestegg','views/package.tpl'))
