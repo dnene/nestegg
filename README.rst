@@ -42,19 +42,22 @@ Quick start
 
 .. code:: yml
 
-  nestegg:
-    nestegg_dir: /var/cache/nestegg                         # Where nestegg makes a nest
-    port: 7654                                              # Port to run on
-    index-url: https://pypi.python.org/simple               # Pypi Index URL
-    source_builds:                                          # List of source builds
-      - name: my_package_name                               # package name
-        repo_type: git                                      # git and hg supported
-        repo_url: git@mygithost.com:myuserid/mypackage.git  # git url here
-        private: Yes                                        # private or public
-        versions:
-          - version: 1.0.0                                  # python version
-            tag: 1.0.0                                      # git/hg branch/tag name
-            dist_file: mypackage-1.0.0.tar.gz               # source dist file name
+  nestegg_dir: /var/cache/nestegg                         # Where nestegg makes a nest
+  port: 7654                                              # Port to run on
+  index-url: https://pypi.python.org/simple               # Pypi Index URL
+  refresh_package_indices: 1d                             # Frequency to check for new versions
+  source_builds:                                          # List of source builds
+    - name: my_package_name                               # package name
+      repo_type: git                                      # git and hg supported
+      repo_url: git@mygithost.com:myuserid/mypackage.git  # git url here
+                                                          # could also be file:///.....
+      private: Yes                                        # private or public
+                                                          # Private if package does not exist on pypi
+      versions:
+        - version: 1.0.0                                  # python version
+          tag: 1.0.0                                      # git/hg branch/tag name
+          dist_file: mypackage-1.0.0.tar.gz               # source dist file name
+          python: /usr/bin/python2.7                      # (optional) python exe when building source dist
 
 For each source build / version defined, nestegg will :
 
