@@ -6,6 +6,8 @@ from sh import git, hg, cd, cp
 from subprocess import call
 from yaml import load, dump
 from requests import head
+from datetime import timedelta
+from  datetime import datetime as dt
 import logging.config
 import os
 import shutil
@@ -47,7 +49,7 @@ def get_app():
     default_config = {
         "nestegg_dir" : "{}/.nestegg".format(opath.expanduser('~')),
         "index_url": "https://pypi.python.org/simple",
-        "port": 7654,  "fresh": "0",
+        "port": 7654,  "fresh": "0", "refresh_interval": "1d",
     }
     config_file = lookup_config_file("nestegg.yml")
     if config_file :
@@ -59,11 +61,12 @@ def get_app():
     else :
         config = get_config(default_config)
 
+    config.refresh_interval = get_timedelta(config.refresh_interval)
     config.pypi_dir = os.path.join(config.nestegg_dir,"pypi")
     config.checkout_dir = os.path.join(config.nestegg_dir,"checkout")
     config.source_dir = os.path.join(config.nestegg_dir,"source_builds")
     config.archives_dir =os.path.join(config.nestegg_dir,"archived_builds")
-    config.private_packages = set()
+    config.pvt_pkgs = set()
     config.runtime = Generic()
     os.makedirs(config.pypi_dir,0o755, exist_ok=True)
     scan_packages(config)
@@ -80,6 +83,12 @@ class NesteggPackageIndex(PackageIndex):
             del self.fetched_urls[url]
         super().process_index(url, page)
 
+durations = { "w": "weeks", "d": "days", 
+              "h": "hours", "m": "minutes", "s": "seconds"}
+
+def get_timedelta(td_str):
+    return timedelta(**{durations[tok[-1]]:int(tok[:-1]) 
+                        for tok in td_str.split()}).total_seconds()
 
 def source_build_dir(config, pkg_name) : 
     return opath.join(config.source_dir, pkg_name)
@@ -95,7 +104,7 @@ def check_source_builds(config):
     os.makedirs(config.checkout_dir,exist_ok=True)
     for pkg in  config.source_builds :
         if not hasattr(pkg, "private") : setattr(pkg, "private", False)
-        elif pkg.private : config.private_packages.add(pkg.name)
+        elif pkg.private : config.pvt_pkgs.add(pkg.name)
         if any(not opath.exists(source_build_file(config,pkg.name, v.dist_file)) 
                     for v in pkg.versions) :
             os.makedirs(source_build_dir(config,pkg.name), exist_ok=True)
@@ -121,38 +130,36 @@ def file_md5(path) :
             m.update(chunk)
     return m.hexdigest()
 
+def update_versions(config, dir_type, pkg_name, pkg_path, versions) :
+    pkg_dir = opath.join(getattr(config,dir_type + "_dir"), pkg_name)
+    if opath.exists(pkg_dir) :
+        for fname in os.listdir(pkg_dir) :
+            fpath = opath.join(pkg_dir,fname)
+            if opath.isfile(fpath) :
+                cp(fpath, pkg_path)
+                versions[fname] =  "md5={}".format(file_md5(fpath))
+
 def get_pkg_html(config, pkg_path, pkg_idx, pkg_name, pindex):
     os.makedirs(pkg_path, exist_ok=True)
     html_file = opath.join(pkg_path, "index.html")
-    if pkg_name in config.private_packages or not pkg_idx[pkg_name] :
-      versions = {}
-    else :
-        versions = dict((egg_info(d.location) for d in pkg_idx[pkg_name]))
-    if pkg_idx.fresh or not opath.exists(html_file) :
-        archives_pkg_dir = archives_dir(config, pkg_name)
-        if opath.exists(archives_pkg_dir) :
-            for fname in os.listdir(archives_pkg_dir) :
-                fpath = opath.join(archives_pkg_dir,fname)
-                if opath.isfile(fpath) :
-                    cp(fpath, pkg_path)
-                    versions[fname] =  "md5={}".format(file_md5(fpath))
-        source_pkg_dir = source_build_dir(config, pkg_name)
-        if opath.exists(source_pkg_dir) :
-            for fname in os.listdir(source_pkg_dir) :
-                fpath = opath.join(source_pkg_dir,fname)
-                if opath.isfile(fpath) :
-                    cp(fpath, pkg_path)
-                    versions[fname] =  "md5={}".format(file_md5(fpath))
-        info = {"name" : pkg_name,"versions": versions }
-        with open(html_file, "w") as outfile :
-            outfile.write(pindex.render(**info))
+    versions = {} if pkg_name in config.pvt_pkgs or not pkg_idx[pkg_name] else\
+        dict((egg_info(d.location) for d in pkg_idx[pkg_name]))
+    if (not opath.exists(html_file)) or (dt.now().timestamp() > \
+        (opath.getmtime(html_file) + config.refresh_interval)):
+        log.debug("Refreshing versions for package {}".format(pkg_name))
+        update_versions(config, "archives", pkg_name, pkg_path, versions)
+        update_versions(config, "source", pkg_name, pkg_path, versions)
+        with open(html_file, "w") as outfile : outfile.write(
+                pindex.render(**{"name" : pkg_name,"versions": versions }))
     return (pkg_path, "index.html")
                 
 @route('/simple/')
 def get_root():
     config, pkg_idx = request.app.config['ctx'], request.app.config['pkg_idx']
-    if not opath.exists(opath.join(config.pypi_dir,"index.html")):
-        log.debug("Updating base index")
+    index_file = opath.join(config.pypi_dir,"index.html")
+    if (not opath.exists(index_file)) or (dt.now().timestamp() >
+        (opath.getmtime(index_file) + config.refresh_interval)):
+        log.debug("Refreshing base index")
         pkg_idx.scan_all()
         with open(opath.join(config.pypi_dir,"index.html"), "w") as h :
             h.write(app.config['views'].gindex.render(
@@ -160,11 +167,11 @@ def get_root():
     return static_file("index.html", root=config.pypi_dir)    
 
 def is_valid_package(config, pkg_idx, pkg_name) :
-    if pkg_name in config.private_packages : return True
+    if pkg_name in config.pvt_pkgs : return True
     if opath.exists(archives_dir(config, pkg_name)) : return True
     if opath.exists(source_build_dir(config, pkg_name)) :
         if not pkg_idx[pkg_name] :
-            config.private_packages.add(pkg_name)
+            config.pvt_pkgs.add(pkg_name)
         return True
     return True if pkg_idx[pkg_name] else False
 
@@ -188,7 +195,7 @@ def get_package(pkg_name):
     real_pkg_name = get_real_mixed_case_name(config,pkg_name)
     if real_pkg_name != pkg_name :
         redirect('/simple/{}/'.format(real_pkg_name))
-    if pkg_name not in config.private_packages :
+    if pkg_name not in config.pvt_pkgs :
         pkg_idx.find_packages(Requirement.parse(pkg_name))
     pkg_path = opath.join(config.pypi_dir, pkg_name)
     if is_valid_package(config, pkg_idx, pkg_name) :
