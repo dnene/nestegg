@@ -100,10 +100,23 @@ def archives_dir(config, pkg_name) :
 def source_build_file(config, pkg_name, file_name) : 
     return opath.join(config.source_dir, pkg_name, file_name)
 
-def check_source_builds(config):
+def check_branch_tag(pkg, ver) :
+    if hasattr(ver,"tag") ==  hasattr(ver, "branch"):
+        raise NesteggException(
+            "Exactly one of Branch/Tag should be specified for {}/{}".\
+                    format(pkg.name, ver.version))
+    if hasattr(ver,"branch") :
+        ver.tag = ver.branch
+        ver.branch = None
+        ver.is_branch = True
+    else :
+        ver.is_branch = False
+
+def check_repositories(config):
     cwd = os.getcwd()
     os.makedirs(config.checkout_dir,exist_ok=True)
-    for pkg in  config.source_builds :
+    for pkg in  config.repositories :
+        for ver in pkg.versions : check_branch_tag(pkg, ver)
         if not hasattr(pkg, "private") : setattr(pkg, "private", False)
         elif pkg.private : config.pvt_pkgs.add(pkg.name)
         if any(not opath.exists(source_build_file(config,pkg.name, v.dist_file)) 
@@ -116,7 +129,6 @@ def check_source_builds(config):
             cd(pkg_co_dir)
             for ver in pkg.versions :
                 pyexe = "python" if not hasattr(ver,"python") else ver.python
-                print("Python is {}".format(pyexe))
                 call([pkg.repo_type, "checkout", ver.tag])
                 call([pyexe, "setup.py", "sdist"])
                 cp(opath.join(pkg_co_dir,"dist",ver.dist_file),
@@ -245,7 +257,7 @@ def main() :
     config = app.config['ctx']
     pkg_idx = NesteggPackageIndex(config.fresh, config.index_url)
     app.config['pkg_idx'] = pkg_idx
-    check_source_builds(app.config["ctx"])
+    check_repositories(app.config["ctx"])
     app.config['views'] = Generic()
     app.config['views'].pindex = \
         SimpleTemplate(resource_string('nestegg','views/package.tpl'))
