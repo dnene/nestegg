@@ -66,10 +66,16 @@ def get_app(args):
     config.refresh_interval = get_timedelta(config.refresh_interval)
     config.pypi_dir = os.path.join(config.nestegg_dir,"pypi")
     config.checkout_dir = os.path.join(config.nestegg_dir,"checkout")
+    config.tests_co_dir = os.path.join(config.nestegg_dir,"tests_checkout")
+    config.tests_log_dir = os.path.join(config.nestegg_dir,"tests_logs")
     config.source_dir = os.path.join(config.nestegg_dir,"source_builds")
     config.archives_dir =os.path.join(config.nestegg_dir,"archived_builds")
     config.pvt_pkgs = set()
     config.runtime = Generic()
+    os.makedirs(config.pypi_dir,0o755, exist_ok=True)
+    #os.makedirs(config.checkout_dir,0o755, exist_ok=True)
+    os.makedirs(config.tests_co_dir,0o755, exist_ok=True)
+    os.makedirs(config.tests_log_dir,0o755, exist_ok=True)
     os.makedirs(config.pypi_dir,0o755, exist_ok=True)
     scan_packages(config)
     app.config['ctx'] = config
@@ -137,9 +143,17 @@ def check_repositories(config):
                        ver.dist_file))
     cd(cwd)
 
-def tester(pkg, ver) :
+def tester(config, pkg, ver) :
     def test() :
-        print("Running {}/{} at {}".format(pkg.name, ver.version, dt.now()))
+        pkg_dir=opath.join(config.tests_co_dir,pkg.name)
+        tag_dir=opath.join(config.tests_co_dir,pkg.name,ver.tag)
+        if not opath.exists(tag_dir) :
+            os.makedirs(pkg_dir,0o755, exist_ok=True)
+            cd(pkg_dir)
+            call([pkg.repo_type, "clone", pkg.repo_url, ver.tag]) 
+        cd(tag_dir)
+        call([pkg.repo_type, "checkout", ver.tag])
+        call(["tox"]) 
     return test
 
 def start_schedules(config) :
@@ -153,7 +167,7 @@ def start_schedules(config) :
                     raise NesteggException(
                         "{}:{} is not a branch. Cannot apply test_schedule".\
                             format(pkg.name, ver.version))
-                sched.add_cron_job(tester(pkg,ver), 
+                sched.add_cron_job(tester(config,pkg,ver), 
                     **ver.test_schedule.__dict__)
 
 def file_md5(path) :
