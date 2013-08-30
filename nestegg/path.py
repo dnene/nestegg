@@ -1,23 +1,8 @@
 import os.path
+import os
+from nestegg import NesteggException
 
 class Path(object):
-    class Methods(object):
-        @staticmethod
-        def exists(path) :
-            return os.path.exists(path)
-        @staticmethod
-        def listdir(path):
-            return os.listdir(path)
-        @staticmethod
-        def isdir(path):
-            return os.path.isdir(path)
-        @staticmethod
-        def isfile(path):
-            return os.path.isfile(path)
-        @staticmethod
-        def getmtime(path):
-            return os.path.getmtime(path)
-
     def __init__(self,p) :
         self.p = os.path.expanduser(p) if p.startswith("~") else \
                  os.path.abspath(p)
@@ -35,5 +20,8 @@ class Path(object):
         return self.p
     def __call__(self, *args, **kwargs) :
         path, method = os.path.split(self.p)
-        return getattr(Path.Methods,method)(path, *args, **kwargs)
+        dfunc  = getattr(os.path,method,None) or getattr(os, method,None)
+        if dfunc  :
+            return dfunc (path, *args, **kwargs)
+        raise NesteggException("Invalid method {} on path".format(method))
         
