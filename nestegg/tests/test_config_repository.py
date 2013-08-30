@@ -27,6 +27,25 @@ class TestPath(unittest.TestCase):
         self.assertEqual("name", r.name)
         self.assertEqual("git", r.vcs)
         self.assertEqual("url", r.url)
-        self.assertEqual(False, r.private)
+        self.assertFalse(r.private)
         self.assertEqual([],r.releases)
         self.assertEqual([], r.branches)
+        
+    def test_constructor_with_all_parameters(self):
+        r = Repository("parent",name="name", vcs="git", url="url", 
+                       private=True, releases=[{"version": "version1"}], 
+                       branches=[{"name": "name1"}])
+        self.assertEqual("parent", r.parent)
+        self.assertEqual("name", r.name)
+        self.assertEqual("git", r.vcs)
+        self.assertEqual("url", r.url)
+        self.assertTrue(r.private)
+        self.assertEqual(1,len(r.releases))
+        rel = r.releases[0]
+        self.assertEqual(r, rel.parent)
+        self.assertEqual("version1", rel.version)
+        self.assertEqual(1,len(r.branches))
+        br = r.branches[0]
+        self.assertEqual(r, br.parent)
+        self.assertEqual("name1", br.name)
+        
