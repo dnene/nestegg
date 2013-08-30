@@ -1,6 +1,5 @@
 from nestegg import NesteggException
 import os.path 
-import os
 from datetime import timedelta
 from yaml import load
 import logging
@@ -20,11 +19,12 @@ def get_timedelta(td_str):
                         for tok in td_str.split()}).total_seconds()
 
 def existing_dist_candidate(base_path, name, version) :
-     return (c for c in dist_candidates(name, version) if 
+    return (c for c in dist_candidates(name, version) if 
              (base_path + name + c).exists())
     
 def dist_candidates(name, version) :
-        return ("{}-{}.{}".format(name, version, ext) for ext in (".tar.gz", ".egg", ".zip"))
+        return ("{}-{}.{}".format(name, version, ext) 
+                for ext in (".tar.gz", ".egg", ".zip"))
 
 class CommitState(object) :
     @property
@@ -38,7 +38,7 @@ class Release(CommitState):
                        dist_file = None) :
         self.parent = parent
         self.version = version if version else get_out(
-                "tag mandatory for a release")
+                "version mandatory for a release")
         self.tag = tag or version
         self.python = python or "python"
         self.dist_file = dist_file
@@ -68,26 +68,20 @@ class Repository(object) :
 class Config(object):
     def __init__(self, storage_dir=None, index_url=None, port=None, 
                        refresh_interval=None, repositories=None):
-        os.makedirs(storage_dir,0o755, exist_ok=True)
         self.storage_dir = Path(storage_dir or \
                            "{}/.nestegg".format(os.path.expanduser('~')))
         self.index_url = index_url or "https://pypi.python.org/simple"
         self.port = int(port) or 7654
         self.refresh_interval = get_timedelta(refresh_interval or "1d")
-        self.pypi_dir =  self.compute_dir( "pypi")
-        self.checkout_dir = self.compute_dir("checkout")
-        self.tests_co_dir = self.compute_dir("checkout_testing")
-        self.testlog_dir = self.compute_dir("testlog")
-        self.archives_dir =self.compute_dir("archived_builds")
-        self.src_dist_dir =self.compute_dir("source_dists")
+        self.pypi_dir = self.storage_dir.pypi
+        self.checkout_dir = self.storage_dir.checkout
+        self.tests_co_dir = self.storage_dir.checkout_testing
+        self.testlog_dir = self.storage_dir.testlog
+        self.archives_dir = self.storage_dir.archived_builds
+        self.src_dist_dir = self.storage_dir.source_dists
         self.repositories = list(Repository(self,**r) for r in repositories)
         self.pvt_pkgs = set()
         self.runtime = Generic()
-
-    def compute_dir(self, dir_name) :
-        full_dir = self.storage_dir[dir_name]
-        os.makedirs(+full_dir,0o755, exist_ok=True)
-        return full_dir
 
 def lookup_config_file(filename):
     for f in [+(Path('~')[filename]),

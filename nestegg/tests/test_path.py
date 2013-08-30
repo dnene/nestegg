@@ -18,6 +18,12 @@ class TestPath(unittest.TestCase):
     def test_dereference_operator(self):
         self.assertEqual(self.homedir, +(self.home))
     
+    def test_path_building_with_attr(self):
+        self.assertEqual(self.homedir + "/projects", self.home.projects.p)
+        
+    def test_path_building_with_item(self):
+        self.assertEqual(self.homedir + "/projects", self.home["projects"].p)
+        
     def test_invalid_func_invocation(self):
         with self.assertRaises(NesteggException) as ne :
             self.home.do_invalid_operation()

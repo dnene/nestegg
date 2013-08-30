@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 
 def scan_packages(config) :
     packages = {}
+    config.pypi_dir.makedirs(0o755, exist_ok=True)
     for dirname in config.pypi_dir.listdir() :
         if config.pypi_dir[dirname].isdir() :
             packages[dirname.lower()] = dirname
@@ -50,7 +51,7 @@ def build_repo(repo, rel):
     call([pyexe, "setup.py", "sdist"])
 
 def build_dist_for(config, repo) :
-    os.makedirs(+config.src_dist_dir[repo.name], exist_ok=True)
+    config.src_dist_dir[repo.name].makedirs(0o755, exist_ok=True)
     repo_co_dir = checkout(config, repo)
     for rel in repo.releases :
         if not existing_dist(config, repo, rel) :
@@ -67,7 +68,7 @@ def existing_dist(config, repo, release):
 
 def check_repositories(config):
     cwd = os.getcwd()
-    os.makedirs(+config.checkout_dir, 0o755, exist_ok=True)
+    config.checkout_dir.makedirs(0o755, exist_ok=True)
     for repo in  config.repositories :
         if repo.private : config.pvt_pkgs.add(repo.name)
         build_dist_for(config, repo)
@@ -78,7 +79,7 @@ def tester(config, repo, branch) :
         repo_dir=config.tests_co_dir[repo.name]
         tag_dir=repo_dir[branch.name]
         if not tag_dir.exists() :
-            os.makedirs(+repo_dir,0o755, exist_ok=True)
+            repo_dir.makedirs(0o755, exist_ok=True)
             cd(+repo_dir)
             call([repo.vcs, "clone", repo.url, branch.name]) 
         cd(+tag_dir)
@@ -113,7 +114,7 @@ def update_versions(config, dir_type, pkg_name, pkg_path, versions) :
                 versions[fname] =  "md5={}".format(file_md5(+fpath))
 
 def get_pkg_html(config, pkg_path, pkg_idx, pkg_name, pindex):
-    os.makedirs(+pkg_path, exist_ok=True)
+    pkg_path.makedirs(0o755, exist_ok=True)
     html_file = pkg_path["index.html"]
     versions = {} if pkg_name in config.pvt_pkgs or not pkg_idx[pkg_name] else\
         dict((egg_info(d.location) for d in pkg_idx[pkg_name]))
