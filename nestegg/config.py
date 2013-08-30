@@ -37,8 +37,7 @@ class Release(CommitState):
     def __init__(self, parent, version = None, tag = None, python=None,
                        dist_file = None) :
         self.parent = parent
-        self.version = version if version else get_out(
-                "version mandatory for a release")
+        self.version = version or get_out("version mandatory for a release")
         self.tag = tag or version
         self.python = python or "python"
         self.dist_file = dist_file
@@ -57,10 +56,10 @@ class Repository(object) :
     def __init__(self, parent, name=None, vcs=None, url=None, private=None,
                        releases=[], branches=[]) :
         self.parent = parent
-        self.name = name if name else get_out("config.name is mandatory")
+        self.name = name or get_out("name is mandatory for a repository")
         self.vcs = vcs if vcs in ("git", "hg") else \
-                    get_out("config.type must be git or hg")
-        self.url = url
+                    get_out("vcs type must be git or hg")
+        self.url = url or get_out("vcs url must be provided")
         self.private = private == True
         self.releases = list(Release(self, **r) for r in releases) 
         self.branches = list(Branch(self, **b) for b in branches) 

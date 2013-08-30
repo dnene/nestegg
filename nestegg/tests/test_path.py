@@ -10,7 +10,7 @@ class TestPath(unittest.TestCase):
         self.etc = Path("/etc")
     
     def test_constructor_simple(self):
-        self.assertEquals(self.etc.p,"/etc")
+        self.assertEqual(self.etc.p,"/etc")
     
     def test_constructor_expanded(self):
         self.assertEqual(os.path.expanduser("~") + "/foo", self.home.foo.p)
