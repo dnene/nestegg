@@ -4,9 +4,7 @@ from pkg_resources import Requirement, resource_string
 from setuptools.package_index import PackageIndex, egg_info_for_url as egg_info
 from sh import git, hg, cd, cp
 from subprocess import call
-from yaml import load, dump
 from requests import head
-from datetime import timedelta
 from datetime import datetime as dt
 from argparse import ArgumentParser
 from apscheduler.scheduler import Scheduler
@@ -15,144 +13,76 @@ import os
 import shutil
 import sys
 import tempfile
-import os.path as opath
+from nestegg.config import get_config, Generic
+from nestegg import NesteggException, first
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
 
-class NesteggException(Exception): pass
-class Generic(object): pass
-
-def lookup_config_file(filename):
-    for f in [opath.join(opath.expanduser('~'), filename),
-              '/etc/{}'.format(filename) ] :
-        if opath.exists(f) : return f
-    raise NesteggException("Cannot find config file {}".format(filename))
-
-def get_config(data) :
-    if isinstance(data, dict) :
-        config = Generic()
-        for key, value in data.items() :
-            setattr(config, key, get_config(value))
-        return config
-    elif isinstance(data, (list, tuple)) :
-        return [get_config(item) for item in data]
-    return data
-
 def scan_packages(config) :
     packages = {}
-    for dirname in os.listdir(config.pypi_dir) :
-        if opath.isdir(opath.join(config.pypi_dir,dirname)) :
+    for dirname in config.pypi_dir.listdir() :
+        if config.pypi_dir[dirname].isdir() :
             packages[dirname.lower()] = dirname
     config.runtime.packages = packages
 
-def get_app(args):
-    app = default_app()
-    default_config = {
-        "nestegg_dir" : "{}/.nestegg".format(opath.expanduser('~')),
-        "index_url": "https://pypi.python.org/simple",
-        "port": 7654,  "fresh": "0", "refresh_interval": "1d",
-    }
-    config_file = args.conf or lookup_config_file("nestegg.yml")
-    if config_file :
-        with open(config_file,"r") as in_config :
-            config = get_config(load(in_config))
-        for key, value in default_config.items() :
-            if not hasattr(config,key): 
-                setattr(config,key,value)
-    else :
-        config = get_config(default_config)
-
-    config.refresh_interval = get_timedelta(config.refresh_interval)
-    config.pypi_dir = os.path.join(config.nestegg_dir,"pypi")
-    config.checkout_dir = os.path.join(config.nestegg_dir,"checkout")
-    config.tests_co_dir = os.path.join(config.nestegg_dir,"tests_checkout")
-    config.tests_log_dir = os.path.join(config.nestegg_dir,"tests_logs")
-    config.source_dir = os.path.join(config.nestegg_dir,"source_builds")
-    config.archives_dir =os.path.join(config.nestegg_dir,"archived_builds")
-    config.pvt_pkgs = set()
-    config.runtime = Generic()
-    os.makedirs(config.pypi_dir,0o755, exist_ok=True)
-    #os.makedirs(config.checkout_dir,0o755, exist_ok=True)
-    os.makedirs(config.tests_co_dir,0o755, exist_ok=True)
-    os.makedirs(config.tests_log_dir,0o755, exist_ok=True)
-    os.makedirs(config.pypi_dir,0o755, exist_ok=True)
-    scan_packages(config)
-    app.config['ctx'] = config
-    return app
-
 class NesteggPackageIndex(PackageIndex):
-    def __init__(self, fresh, *args, **kwargs):
-        self.fresh = "fresh" == "1"
+    def __init__(self, *args, **kwargs):
         super().__init__(*args,**kwargs)
     
-    def process_index(self, url, page):
-        if self.fresh: 
-            del self.fetched_urls[url]
-        super().process_index(url, page)
+    #def process_index(self, url, page):
+        #if self.fresh: 
+            #del self.fetched_urls[url]
+        #super().process_index(url, page)
 
-durations = { "w": "weeks", "d": "days", 
-              "h": "hours", "m": "minutes", "s": "seconds"}
+def checkout(config, repo):
+    repo_co_dir=config.checkout_dir[repo.name]
+    if not repo_co_dir.exists(): 
+        cd(+config.checkout_dir)
+        call([repo.vcs, "clone", repo.url, repo.name]) 
+        cd(+repo_co_dir)
+    return repo_co_dir
 
-def get_timedelta(td_str):
-    return timedelta(**{durations[tok[-1]]:int(tok[:-1]) 
-                        for tok in td_str.split()}).total_seconds()
+def build_repo(repo, rel):
+    log.debug("Current working directory: " + os.getcwd())
+    pyexe = "python" if not hasattr(rel,"python") else rel.python
+    call([repo.vcs, "checkout", rel.tag])
+    call([pyexe, "setup.py", "sdist"])
 
-def source_build_dir(config, pkg_name) : 
-    return opath.join(config.source_dir, pkg_name)
+def build_dist_for(config, repo) :
+    os.makedirs(+config.src_dist_dir[repo.name], exist_ok=True)
+    repo_co_dir = checkout(config, repo)
+    for rel in repo.releases :
+        if not existing_dist(config, repo, rel) :
+            build_repo(repo, rel)
+            cp(+repo_co_dir.dist[rel.archive], 
+               +config.src_dist_dir[repo.name][rel.archive])
 
-def archives_dir(config, pkg_name) : 
-    return opath.join(config.archives_dir, pkg_name)
-
-def source_build_file(config, pkg_name, file_name) : 
-    return opath.join(config.source_dir, pkg_name, file_name)
-
-def check_branch_tag(pkg, ver) :
-    if hasattr(ver,"tag") ==  hasattr(ver, "branch"):
-        raise NesteggException(
-            "Exactly one of Branch/Tag should be specified for {}/{}".\
-                    format(pkg.name, ver.version))
-    if hasattr(ver,"branch") :
-        ver.tag = ver.branch
-        ver.branch = None
-        ver.is_branch = True
-    else :
-        ver.is_branch = False
+def existing_dist(config, repo, release):
+    if release.dist_file : 
+        return config.src_dist_dir[repo.name][release.dist_file].exists()
+    return first(filter(lambda f: config.src_dist_dir[repo.name][f].exists(),
+            ("{}-{}.{}".format(repo.name, release.version, ext)
+                for ext in ("tar.gz", "egg", "zip"))))
 
 def check_repositories(config):
     cwd = os.getcwd()
-    os.makedirs(config.checkout_dir,exist_ok=True)
-    for pkg in  config.repositories :
-        for ver in pkg.versions : check_branch_tag(pkg, ver)
-        if not hasattr(pkg, "private") : setattr(pkg, "private", False)
-        elif pkg.private : config.pvt_pkgs.add(pkg.name)
-        if any(not opath.exists(source_build_file(config,pkg.name, v.dist_file)) 
-                    for v in pkg.versions) :
-            os.makedirs(source_build_dir(config,pkg.name), exist_ok=True)
-            pkg_co_dir=opath.join(config.checkout_dir,pkg.name)
-            if opath.exists(pkg_co_dir): shutil.rmtree(pkg_co_dir)
-            cd(config.checkout_dir)
-            call([pkg.repo_type, "clone", pkg.repo_url, pkg.name]) 
-            cd(pkg_co_dir)
-            for ver in pkg.versions :
-                pyexe = "python" if not hasattr(ver,"python") else ver.python
-                call([pkg.repo_type, "checkout", ver.tag])
-                call([pyexe, "setup.py", "sdist"])
-                cp(opath.join(pkg_co_dir,"dist",ver.dist_file),
-                   opath.join(source_build_dir(config, pkg.name),
-                       ver.dist_file))
+    os.makedirs(+config.checkout_dir, 0o755, exist_ok=True)
+    for repo in  config.repositories :
+        if repo.private : config.pvt_pkgs.add(repo.name)
+        build_dist_for(config, repo)
     cd(cwd)
 
-def tester(config, pkg, ver) :
+def tester(config, repo, branch) :
     def test() :
-        pkg_dir=opath.join(config.tests_co_dir,pkg.name)
-        tag_dir=opath.join(config.tests_co_dir,pkg.name,ver.tag)
-        if not opath.exists(tag_dir) :
-            os.makedirs(pkg_dir,0o755, exist_ok=True)
-            cd(pkg_dir)
-            call([pkg.repo_type, "clone", pkg.repo_url, ver.tag]) 
-        cd(tag_dir)
-        call([pkg.repo_type, "checkout", ver.tag])
+        repo_dir=config.tests_co_dir[repo.name]
+        tag_dir=repo_dir[branch.name]
+        if not tag_dir.exists() :
+            os.makedirs(+repo_dir,0o755, exist_ok=True)
+            cd(+repo_dir)
+            call([repo.vcs, "clone", repo.url, branch.name]) 
+        cd(+tag_dir)
+        call([repo.vcs, "checkout", branch.name])
         call(["tox"]) 
     return test
 
@@ -160,15 +90,11 @@ def start_schedules(config) :
     sched = Scheduler()
     config.scheduler = sched
     sched.start()
-    for pkg in config.repositories :
-        for ver in pkg.versions :
-            if hasattr(ver,"test_schedule") :
-                if not ver.is_branch :
-                    raise NesteggException(
-                        "{}:{} is not a branch. Cannot apply test_schedule".\
-                            format(pkg.name, ver.version))
-                sched.add_cron_job(tester(config,pkg,ver), 
-                    **ver.test_schedule.__dict__)
+    for repo in config.repositories :
+        for branch in repo.branches :
+            if branch.schedule :
+                sched.add_cron_job(tester(config,repo,branch), 
+                    **branch.schedule)
 
 def file_md5(path) :
     m = md5()
@@ -178,45 +104,46 @@ def file_md5(path) :
     return m.hexdigest()
 
 def update_versions(config, dir_type, pkg_name, pkg_path, versions) :
-    pkg_dir = opath.join(getattr(config,dir_type + "_dir"), pkg_name)
-    if opath.exists(pkg_dir) :
-        for fname in os.listdir(pkg_dir) :
-            fpath = opath.join(pkg_dir,fname)
-            if opath.isfile(fpath) :
-                cp(fpath, pkg_path)
-                versions[fname] =  "md5={}".format(file_md5(fpath))
+    pkg_dir = getattr(config,dir_type + "_dir")[pkg_name]
+    if pkg_dir.exists() :
+        for fname in os.listdir(+pkg_dir) :
+            fpath = pkg_dir[fname]
+            if fpath.isfile() :
+                cp(+fpath, +pkg_path)
+                versions[fname] =  "md5={}".format(file_md5(+fpath))
 
 def get_pkg_html(config, pkg_path, pkg_idx, pkg_name, pindex):
-    os.makedirs(pkg_path, exist_ok=True)
-    html_file = opath.join(pkg_path, "index.html")
+    os.makedirs(+pkg_path, exist_ok=True)
+    html_file = pkg_path["index.html"]
     versions = {} if pkg_name in config.pvt_pkgs or not pkg_idx[pkg_name] else\
         dict((egg_info(d.location) for d in pkg_idx[pkg_name]))
-    if (not opath.exists(html_file)) or (dt.now().timestamp() > \
-        (opath.getmtime(html_file) + config.refresh_interval)):
-        log.debug("Refreshing versions for package {}".format(pkg_name))
+    if is_stale(config,html_file) :
+        log.debug("Refreshing package {}".format(pkg_name))
         update_versions(config, "archives", pkg_name, pkg_path, versions)
-        update_versions(config, "source", pkg_name, pkg_path, versions)
-        with open(html_file, "w") as outfile : outfile.write(
+        update_versions(config, "src_dist", pkg_name, pkg_path, versions)
+        with open(+html_file, "w") as outfile : outfile.write(
                 pindex.render(**{"name" : pkg_name,"versions": versions }))
     return (pkg_path, "index.html")
-                
+
+def is_stale(config, index_file) :
+    return (not index_file.exists()) or (dt.now().timestamp() >
+            (index_file.getmtime() + config.refresh_interval))
+
 @route('/simple/')
 def get_root():
     config, pkg_idx = request.app.config['ctx'], request.app.config['pkg_idx']
-    index_file = opath.join(config.pypi_dir,"index.html")
-    if (not opath.exists(index_file)) or (dt.now().timestamp() >
-        (opath.getmtime(index_file) + config.refresh_interval)):
+    if is_stale(config, config.pypi_dir["index.html"]) :
         log.debug("Refreshing base index")
         pkg_idx.scan_all()
-        with open(opath.join(config.pypi_dir,"index.html"), "w") as h :
+        with open(+config.pypi_dir["index.html"], "w") as h :
             h.write(app.config['views'].gindex.render(
                 pkgs=sorted(pkg_idx.package_pages)))
-    return static_file("index.html", root=config.pypi_dir)    
+    return static_file("index.html", root=+config.pypi_dir)    
 
 def is_valid_package(config, pkg_idx, pkg_name) :
     if pkg_name in config.pvt_pkgs : return True
-    if opath.exists(archives_dir(config, pkg_name)) : return True
-    if opath.exists(source_build_dir(config, pkg_name)) :
+    if config.archives_dir[pkg_name].exists() : return True
+    if config.src_dist_dir[pkg_name].exists() :
         if not pkg_idx[pkg_name] :
             config.pvt_pkgs.add(pkg_name)
         return True
@@ -244,11 +171,11 @@ def get_package(pkg_name):
         redirect('/simple/{}/'.format(real_pkg_name))
     if pkg_name not in config.pvt_pkgs :
         pkg_idx.find_packages(Requirement.parse(pkg_name))
-    pkg_path = opath.join(config.pypi_dir, pkg_name)
+    pkg_path = config.pypi_dir[pkg_name]
     if is_valid_package(config, pkg_idx, pkg_name) :
         root, html = get_pkg_html(config, pkg_path, pkg_idx, pkg_name,
                 request.app.config['views'].pindex)
-        return static_file(html, root=root)  
+        return static_file(html, root=+root)  
     else:
         abort(404, "No such package {}".format(pkg_name))
 
@@ -257,39 +184,47 @@ def get_package(pkg_name):
 def get_egg(pkg_name, egg_name):
     config, pkg_idx = request.app.config['ctx'], request.app.config['pkg_idx']
     log.debug("Package: {} egg:{}".format(pkg_name, egg_name))
-    pkg_dir = opath.join(config.pypi_dir, pkg_name)
+    pkg_dir = config.pypi_dir[pkg_name]
     if not egg_name.startswith(pkg_name) :
         egg_name="{}-{}.".format(pkg_name,egg_name)
-        if opath.exists(pkg_dir) :
-            for fname in os.listdir(pkg_dir) :
+        if pkg_dir.exists() :
+            for fname in os.listdir(+pkg_dir) :
                 if fname.startswith(egg_name) and fname != egg_name :
                     egg_name = fname
                     break
-    fpath = opath.join(config.pypi_dir, pkg_name, egg_name)
-    if not opath.exists(fpath) :
+    fpath = config.pypi_dir[pkg_name][egg_name]
+    if not fpath.exists() :
         pkg_idx.find_packages(Requirement.parse(pkg_name))
         for dist in pkg_idx[pkg_name] :
             if egg_info(dist.location)[0] == egg_name:
                 log.debug("Fetch {}/{}".format(pkg_name,egg_name))
                 tmp = tempfile.gettempdir()
                 try :
-                    shutil.move(pkg_idx.download(dist.location, tmp), fpath)
-                    return static_file(egg_name, root=pkg_dir)
+                    shutil.move(pkg_idx.download(dist.location, tmp), +fpath)
+                    return static_file(egg_name, root=+pkg_dir)
                 except Exception as _e :
                     pass
         abort(404,"No egg found for {} {}".format(pkg_name,egg_name))
     else :
-        return static_file(egg_name, root=pkg_dir)
+        return static_file(egg_name, root=+pkg_dir)
+
+def get_app(args):
+    app = default_app()
+    config = get_config(args)
+    scan_packages(config)
+    app.config['ctx'] = config
+    return app
 
 def get_argparser() :
-    parser = ArgumentParser( description='lightweight pypi mirror and continuous integration tool')
+    parser = ArgumentParser(description=
+                'lightweight pypi mirror and continuous integration tool')
     parser.add_argument('--conf', help='configuration file')
     return parser
 
 def main() :
     app = get_app(get_argparser().parse_args(sys.argv[1:]))
     config = app.config['ctx']
-    pkg_idx = NesteggPackageIndex(config.fresh, config.index_url)
+    pkg_idx = NesteggPackageIndex(config.index_url)
     app.config['pkg_idx'] = pkg_idx
     check_repositories(app.config["ctx"])
     start_schedules(app.config["ctx"])
