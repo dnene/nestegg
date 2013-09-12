@@ -47,6 +47,7 @@ class Release(CommitState):
 
     def build_dist_for(self, repo_co_dir) :
         if not self.existing_dist() :
+            cd(+repo_co_dir)
             self.build_repo()
             cp(+repo_co_dir.dist[self.archive], 
                +self.config.src_dist_dir[self.parent.name][self.archive])
@@ -62,7 +63,6 @@ class Release(CommitState):
         log.debug("Current working directory: " + os.getcwd())
         call([self.parent.vcs, "checkout", self.tag])
         call([self.python, "setup.py", "sdist"])
-
 
 class Branch(CommitState):
     def __init__(self, parent, name = None, python=None, schedule = {},
@@ -94,7 +94,7 @@ class Repository(object) :
 
     def checkout(self):
         repo_co_dir=self.parent.checkout_dir[self.name]
-        if not repo_co_dir.exists(): 
+        if not repo_co_dir.exists():
             cd(+self.parent.checkout_dir)
             call([self.vcs, "clone", self.url, self.name]) 
             cd(+repo_co_dir)

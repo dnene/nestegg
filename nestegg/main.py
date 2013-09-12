@@ -15,9 +15,20 @@ import sys
 import tempfile
 from nestegg.config import get_config, Generic
 from nestegg import NesteggException
+import os.path
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
+
+#temporary
+
+log.setLevel(logging.DEBUG)
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+#formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+#ch.setFormatter(formatter)
+log.addHandler(ch)
+
 
 def scan_packages(config) :
     packages = {}
@@ -131,8 +142,12 @@ def get_real_mixed_case_name(config, pkg_name):
         if pkg_name.lower() == new_pkg_name.lower() :
             config.runtime.packages[pkg_name.lower()] = new_pkg_name 
             return new_pkg_name
-    raise NesteggException(
-        "Unable to get mixed case package name for {}".format(pkg_name))
+    if pkg_name not in config.pvt_pkgs :
+        log.debug(config.pvt_pkgs)
+        raise NesteggException("Unable to get mixed case package name for {}"\
+                               .format(pkg_name))
+    else :
+        return pkg_name
     
 @route('/simple/<pkg_name>/')
 def get_package(pkg_name):
@@ -155,7 +170,10 @@ def get_package(pkg_name):
 def get_egg(pkg_name, egg_name):
     config, pkg_idx = request.app.config['ctx'], request.app.config['pkg_idx']
     log.debug("Package: {} egg:{}".format(pkg_name, egg_name))
+    packages = {f.lower(): f for f in config.pypi_dir.listdir() if config.pypi_dir[f].isdir()}
+    pkg_name = packages.get(pkg_name.lower(), pkg_name)
     pkg_dir = config.pypi_dir[pkg_name]
+    log.debug("package dir is {}".format(pkg_dir))
     if not egg_name.startswith(pkg_name) :
         egg_name="{}-{}.".format(pkg_name,egg_name)
         if pkg_dir.exists() :
@@ -164,6 +182,7 @@ def get_egg(pkg_name, egg_name):
                     egg_name = fname
                     break
     fpath = config.pypi_dir[pkg_name][egg_name]
+    log.debug("Egg path is {}".format(fpath))
     if not fpath.exists() :
         pkg_idx.find_packages(Requirement.parse(pkg_name))
         for dist in pkg_idx[pkg_name] :
