@@ -1,9 +1,11 @@
-from nestegg import NesteggException
 import os.path 
 from datetime import timedelta
 from yaml import load
+from sh import cd, cp
+from subprocess import call
 import logging
 from nestegg.path import Path
+from nestegg import NesteggException, first
 
 log = logging.getLogger(__name__)
 
@@ -30,22 +32,42 @@ class CommitState(object) :
     @property
     def archive(self): 
         return self.dist_file or list(f for f in (
-            self.parent.parent.checkout_dir[self.parent.name].dist).listdir() 
+            self.config.checkout_dir[self.parent.name].dist).listdir() 
             if f.startswith("{}-{}".format(self.parent.name, self.version)))[0]
 
 class Release(CommitState):
     def __init__(self, parent, version = None, tag = None, python=None,
                        dist_file = None) :
+        self.config = parent.parent
         self.parent = parent
         self.version = version or get_out("version mandatory for a release")
         self.tag = tag or version
         self.python = python or "python"
         self.dist_file = dist_file
 
+    def build_dist_for(self, repo_co_dir) :
+        if not self.existing_dist() :
+            self.build_repo()
+            cp(+repo_co_dir.dist[self.archive], 
+               +self.config.src_dist_dir[self.parent.name][self.archive])
+
+    def existing_dist(self) :
+        if self.dist_file : 
+            return self.config.src_dist_dir[self.parent.name][self.dist_file].exists()
+        return first(filter(lambda f: self.config.src_dist_dir[self.parent.name][f].exists(),
+                ("{}-{}.{}".format(self.parent.name, self.version, ext)
+                    for ext in ("tar.gz", "egg", "zip"))))
+
+    def build_repo(self):
+        log.debug("Current working directory: " + os.getcwd())
+        call([self.parent.vcs, "checkout", self.tag])
+        call([self.python, "setup.py", "sdist"])
+
 
 class Branch(CommitState):
     def __init__(self, parent, name = None, python=None, schedule = {},
                                dist_file = None) :
+        self.config = parent.parent
         self.parent = parent
         self.name = name or get_out("name mandatory for a branch")
         self.python = python if python else "python"
@@ -63,6 +85,22 @@ class Repository(object) :
         self.private = private == True
         self.releases = list(Release(self, **r) for r in releases) 
         self.branches = list(Branch(self, **b) for b in branches) 
+
+    def build_dist_for(self) :
+        self.parent.src_dist_dir[self.name].makedirs(0o755, exist_ok=True)
+        repo_co_dir = self.checkout()
+        for rel in self.releases :
+            rel.build_dist_for(repo_co_dir)
+
+    def checkout(self):
+        repo_co_dir=self.parent.checkout_dir[self.name]
+        if not repo_co_dir.exists(): 
+            cd(+self.parent.checkout_dir)
+            call([self.vcs, "clone", self.url, self.name]) 
+            cd(+repo_co_dir)
+        return repo_co_dir
+
+
 
 class Config(object):
     def __init__(self, storage_dir=None, index_url=None, port=None, 

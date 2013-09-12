@@ -14,7 +14,7 @@ import shutil
 import sys
 import tempfile
 from nestegg.config import get_config, Generic
-from nestegg import NesteggException, first
+from nestegg import NesteggException
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
@@ -36,42 +36,12 @@ class NesteggPackageIndex(PackageIndex):
             #del self.fetched_urls[url]
         #super().process_index(url, page)
 
-def checkout(config, repo):
-    repo_co_dir=config.checkout_dir[repo.name]
-    if not repo_co_dir.exists(): 
-        cd(+config.checkout_dir)
-        call([repo.vcs, "clone", repo.url, repo.name]) 
-        cd(+repo_co_dir)
-    return repo_co_dir
-
-def build_repo(repo, rel):
-    log.debug("Current working directory: " + os.getcwd())
-    pyexe = "python" if not hasattr(rel,"python") else rel.python
-    call([repo.vcs, "checkout", rel.tag])
-    call([pyexe, "setup.py", "sdist"])
-
-def build_dist_for(config, repo) :
-    config.src_dist_dir[repo.name].makedirs(0o755, exist_ok=True)
-    repo_co_dir = checkout(config, repo)
-    for rel in repo.releases :
-        if not existing_dist(config, repo, rel) :
-            build_repo(repo, rel)
-            cp(+repo_co_dir.dist[rel.archive], 
-               +config.src_dist_dir[repo.name][rel.archive])
-
-def existing_dist(config, repo, release):
-    if release.dist_file : 
-        return config.src_dist_dir[repo.name][release.dist_file].exists()
-    return first(filter(lambda f: config.src_dist_dir[repo.name][f].exists(),
-            ("{}-{}.{}".format(repo.name, release.version, ext)
-                for ext in ("tar.gz", "egg", "zip"))))
-
 def check_repositories(config):
     cwd = os.getcwd()
     config.checkout_dir.makedirs(0o755, exist_ok=True)
     for repo in  config.repositories :
         if repo.private : config.pvt_pkgs.add(repo.name)
-        build_dist_for(config, repo)
+        repo.build_dist_for()
     cd(cwd)
 
 def tester(config, repo, branch) :
