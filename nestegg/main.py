@@ -1,21 +1,22 @@
-from bottle import run,route,abort,static_file,SimpleTemplate,default_app,app,request,redirect
+from apscheduler.scheduler import Scheduler
+from argparse import ArgumentParser
+from bottle import run, route, abort, static_file, SimpleTemplate, default_app, \
+    app, request, redirect
+from datetime import datetime as dt
 from hashlib import md5
-from pkg_resources import Requirement, resource_string
+from nestegg import NesteggException
+from nestegg.config import get_config, Generic
+from pkg_resources import Requirement, resource_string, safe_name
+from requests import head
 from setuptools.package_index import PackageIndex, egg_info_for_url as egg_info
 from sh import git, hg, cd, cp
 from subprocess import call
-from requests import head
-from datetime import datetime as dt
-from argparse import ArgumentParser
-from apscheduler.scheduler import Scheduler
 import logging.config
 import os
+import os.path
 import shutil
 import sys
 import tempfile
-from nestegg.config import get_config, Generic
-from nestegg import NesteggException
-import os.path
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
@@ -29,13 +30,14 @@ ch.setLevel(logging.DEBUG)
 #ch.setFormatter(formatter)
 log.addHandler(ch)
 
+def idx_safe_name(n): return safe_name(n).lower()
 
 def scan_packages(config) :
     packages = {}
     config.pypi_dir.makedirs(0o755, exist_ok=True)
     for dirname in config.pypi_dir.listdir() :
         if config.pypi_dir[dirname].isdir() :
-            packages[dirname.lower()] = dirname
+            packages[normalise(dirname)] = dirname
     config.runtime.packages = packages
 
 class NesteggPackageIndex(PackageIndex):
@@ -96,9 +98,10 @@ def update_versions(config, dir_type, pkg_name, pkg_path, versions) :
 
 def get_pkg_html(config, pkg_path, pkg_idx, pkg_name, pindex):
     pkg_path.makedirs(0o755, exist_ok=True)
+    safe_pkg_name = idx_safe_name(pkg_name)
     html_file = pkg_path["index.html"]
-    versions = {} if pkg_name in config.pvt_pkgs or not pkg_idx[pkg_name] else\
-        dict((egg_info(d.location) for d in pkg_idx[pkg_name]))
+    versions = {} if pkg_name in config.pvt_pkgs or not pkg_idx[safe_pkg_name]\
+            else dict((egg_info(d.location) for d in pkg_idx[safe_pkg_name]))
     if is_stale(config,html_file) :
         log.debug("Refreshing package {}".format(pkg_name))
         update_versions(config, "archives", pkg_name, pkg_path, versions)
@@ -129,18 +132,23 @@ def is_valid_package(config, pkg_idx, pkg_name) :
         if not pkg_idx[pkg_name] :
             config.pvt_pkgs.add(pkg_name)
         return True
-    return True if pkg_idx[pkg_name] else False
+
+    return idx_safe_name(pkg_name) in pkg_idx
+
+def normalise(pkg_name):
+    return pkg_name.lower().replace("-","_")
 
 def get_real_mixed_case_name(config, pkg_name):
-    mixed_case_name = config.runtime.packages.get(pkg_name.lower(),None)
+    normalised_name = normalise(pkg_name)
+    mixed_case_name = config.runtime.packages.get(normalised_name,None)
     if mixed_case_name and mixed_case_name == pkg_name :
         return pkg_name
     response = head("https://pypi.python.org/simple/{}/".format(pkg_name))
     if 200 <= response.status_code < 300 : return pkg_name
     elif response.status_code < 400 :
         new_pkg_name = response.headers["location"].split("/")[-1]
-        if pkg_name.lower() == new_pkg_name.lower() :
-            config.runtime.packages[pkg_name.lower()] = new_pkg_name 
+        if normalised_name == normalise(new_pkg_name) :
+            config.runtime.packages[normalised_name] = new_pkg_name 
             return new_pkg_name
     if pkg_name not in config.pvt_pkgs :
         log.debug(config.pvt_pkgs)
@@ -153,11 +161,16 @@ def get_real_mixed_case_name(config, pkg_name):
 def get_package(pkg_name):
     config, pkg_idx = request.app.config['ctx'], request.app.config['pkg_idx']
     real_pkg_name = get_real_mixed_case_name(config,pkg_name)
+    log.debug("Request for package {} denormalised to {}".format(pkg_name, real_pkg_name))
     if real_pkg_name != pkg_name :
+        log.debug("Redirecting to denormalised name {}".format(real_pkg_name))
         redirect('/simple/{}/'.format(real_pkg_name))
     if pkg_name not in config.pvt_pkgs :
+        log.debug("Fetching requirements for {}".format(pkg_name))
         pkg_idx.find_packages(Requirement.parse(pkg_name))
+        log.debug("package is {}".format(pkg_idx[idx_safe_name(pkg_name)]))
     pkg_path = config.pypi_dir[pkg_name]
+    log.debug("Package path is {}".format(pkg_path))
     if is_valid_package(config, pkg_idx, pkg_name) :
         root, html = get_pkg_html(config, pkg_path, pkg_idx, pkg_name,
                 request.app.config['views'].pindex)
@@ -170,8 +183,9 @@ def get_package(pkg_name):
 def get_egg(pkg_name, egg_name):
     config, pkg_idx = request.app.config['ctx'], request.app.config['pkg_idx']
     log.debug("Package: {} egg:{}".format(pkg_name, egg_name))
-    packages = {f.lower(): f for f in config.pypi_dir.listdir() if config.pypi_dir[f].isdir()}
-    pkg_name = packages.get(pkg_name.lower(), pkg_name)
+    packages = {normalise(f): f for f in config.pypi_dir.listdir() 
+                                    if config.pypi_dir[f].isdir()}
+    pkg_name = packages.get(normalise(pkg_name), pkg_name)
     pkg_dir = config.pypi_dir[pkg_name]
     log.debug("package dir is {}".format(pkg_dir))
     if not egg_name.startswith(pkg_name) :
@@ -185,7 +199,7 @@ def get_egg(pkg_name, egg_name):
     log.debug("Egg path is {}".format(fpath))
     if not fpath.exists() :
         pkg_idx.find_packages(Requirement.parse(pkg_name))
-        for dist in pkg_idx[pkg_name] :
+        for dist in pkg_idx[idx_safe_name(pkg_name)] :
             if egg_info(dist.location)[0] == egg_name:
                 log.debug("Fetch {}/{}".format(pkg_name,egg_name))
                 tmp = tempfile.gettempdir()
