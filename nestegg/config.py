@@ -17,8 +17,8 @@ durations = { "w": "weeks", "d": "days",
               "h": "hours", "m": "minutes", "s": "seconds"}
 
 def get_timedelta(td_str):
-    return timedelta(**{durations[tok[-1]]:int(tok[:-1]) 
-                        for tok in td_str.split()}).total_seconds()
+    return int(timedelta(**{durations[tok[-1]]:int(tok[:-1]) 
+                        for tok in td_str.split()}).total_seconds())
 
 def existing_dist_candidate(base_path, name, version) :
     return (c for c in dist_candidates(name, version) if 
