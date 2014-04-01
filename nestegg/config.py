@@ -116,7 +116,7 @@ class Config(object):
         self.testlog_dir = self.storage_dir.testlog
         self.archives_dir = self.storage_dir.archived_builds
         self.src_dist_dir = self.storage_dir.source_dists
-        self.repositories = list(Repository(self,**r) for r in repositories)
+        self.repositories = list(Repository(self,**r) for r in repositories or [])
         self.pvt_pkgs = set()
         self.runtime = Generic()
 
