@@ -11,7 +11,7 @@ setup(
     long_description=open("README.rst").read(),
     install_requires = [
         'bottle >= 0.11',
-        'PyYAML == 3.10',
+        'PyYAML == 5.4',
         'sh >= 1.08',
         'requests >= 1.2.3',
         'APScheduler >= 2.1.0',
